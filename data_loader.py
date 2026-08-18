@@ -7,12 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Automatically grabs GEMINI_API_KEY from environment variables
 client = genai.Client()
-
-# Recommended options:
-# 1. Use "gemini-embedding-2" (native 3072-dim)
-# 2. Use "text-embedding-004" (768-dim by default, but can be scaled)
 EMBED_MODEL = "gemini-embedding-2" 
 EMBED_DIM = 3072
 
@@ -26,13 +21,17 @@ def load_and_chunk_pdf(path: str):
         chunks.extend(splitter.split_text(t))
     return chunks
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    # Call the correct method and parameter names
-    response = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=texts, # Changed from input=
-        config=types.EmbedContentConfig(output_dimensionality=EMBED_DIM) # Ensures 3072 dims
-    )
-    
-    # Correctly parse Google's nested response structure
-    return [item.values for item in response.embeddings]
+def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
+    vectors = []
+    for text in texts:
+        response = client.models.embed_content(
+            model=EMBED_MODEL,
+            contents=text,
+            config=types.EmbedContentConfig(
+                output_dimensionality=EMBED_DIM,  # Ensures 3072 dims
+                task_type=task_type,
+            ),
+        )
+        vectors.append(response.embeddings[0].values)
+    return vectors
+

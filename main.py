@@ -2,10 +2,10 @@ import logging
 from fastapi import FastAPI
 import inngest
 import inngest.fast_api
-from inngest.experimental import ai 
+from inngest.experimental.ai import gemini as gemini_ai
 from dotenv import load_dotenv
 import uuid 
-from uuid import uuid5  # Explicitly imported to fix the name error
+from uuid import uuid5
 import os 
 import datetime
 from data_loader import load_and_chunk_pdf, embed_texts
@@ -36,10 +36,9 @@ async def rag_ingest_pdf(ctx: inngest.Context):
         chunks = chunks_and_src.chunks
         source_id = chunks_and_src.source_id
         
-        # 1. Obtains the Gemini embeddings (using your newly fixed function)
+        # 1. Obtains the Gemini embeddings
         vecs = embed_texts(chunks)
         
-        # 2. Fixed 'id' to 'i' in both loop comprehensions
         ids = [str(uuid5(uuid.NAMESPACE_URL, f"{source_id}:{i}")) for i in range(len(chunks))]
         payloads = [{"source": source_id, "text": chunks[i]} for i in range(len(chunks))]
         
@@ -50,17 +49,15 @@ async def rag_ingest_pdf(ctx: inngest.Context):
     ingested = await ctx.step.run("embed-and-upsert", lambda: _upsert(chunks_and_src), output_type=RAGUpsertResult)
     return ingested.model_dump()
 
-app = FastAPI()
 
-inngest.fast_api.serve(app, inngest_client, [rag_ingest_pdf]) 
 
 @inngest_client.create_function(
     fn_id="RAG: Query PDF",
     trigger=inngest.TriggerEvent(event="rag/query_pdf_ai")
 )
-async def rag_query_pdf_ai(ctx: inngest.Context)->RAGSearchResult:
+async def rag_query_pdf_ai(ctx: inngest.Context) -> RAGQueryResult:
     def _search(question:str, top_k: int = 5):
-        query_vec = embed_texts([question])[0]
+        query_vec = embed_texts([question], task_type="RETRIEVAL_QUERY")[0]
         store = QdrantStorage()
         found = store.search(query_vec, top_k)
         return RAGSearchResult(contexts=found['contexts'], sources=found["sources"])
@@ -68,3 +65,45 @@ async def rag_query_pdf_ai(ctx: inngest.Context)->RAGSearchResult:
     question = ctx.event.data["question"]
     top_k = int(ctx.event.data.get("top_k",5))
     found = await ctx.step.run("embed-and-search", lambda: _search(question, top_k), output_type=RAGSearchResult)
+    context_block = "\n\n".join(f"- {c}" for c in found.contexts)
+    user_content = (
+            "Use the following context to answer the question.\n\n"
+            f"Context:\n{context_block}\n\n"
+            f"Question: {question}\n"
+            "Answer concisely using the context above."
+        )
+
+
+    adapter = gemini_ai.Adapter(
+        auth_key=os.getenv("GEMINI_API_KEY"),
+        model="gemini-3.6-flash"
+    )
+    res = await ctx.step.ai.infer(
+        "llm-answer",
+        adapter=adapter,
+        body={
+            "contents": [
+                {"role": "user", "parts": [{"text": user_content}]}
+            ],
+            "systemInstruction": {
+                "parts": [{"text": "You answer questions using only the provided context."}]
+            },
+            "generationConfig": {
+                "maxOutputTokens": 1024,
+            },
+        }
+    )
+    candidates = res.get("candidates") or []
+    if not candidates:
+        answer = ""
+    else:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        answer = "".join(p.get("text", "") for p in parts).strip()
+    return RAGQueryResult(answer=answer, sources=found.sources, num_contexts=len(found.contexts)).model_dump()
+
+
+
+
+app = FastAPI()
+
+inngest.fast_api.serve(app, inngest_client, [rag_ingest_pdf, rag_query_pdf_ai]) 

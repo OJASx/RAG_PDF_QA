@@ -11,4 +11,3 @@ wheels/
 .venv
 qdrant_storage/
 ghub_token
-

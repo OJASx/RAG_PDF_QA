@@ -1,6 +1,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 
+
 class QdrantStorage:
     def __init__(self, url="http://localhost:6333", collection="docs", dim=3072):
         self.client = QdrantClient(url=url, timeout=30)
@@ -16,12 +17,12 @@ class QdrantStorage:
         self.client.upsert(self.collection, points=points)
 
     def search(self, query_vector, top_k: int=5):
-        results = self.client.search(
-            collection_name = self.collection,
-            query_vector=query_vector,
+        results = self.client.query_points(
+            collection_name=self.collection,
+            query=query_vector,
             with_payload=True,
             limit=top_k
-        )
+        ).points
 
         context = []
         sources = set()

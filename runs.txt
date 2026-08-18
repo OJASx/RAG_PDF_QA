@@ -1,0 +1,5 @@
+python server = uv run uvicorn main:app
+docker = docker run -d --name qdrantRagDb -p 6333:6333 -v "./qdrant_storage:/qdrant/storage" qdrant/qdrant
+docker_ = docker start qdrantRagDB
+inngest = npx inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery
+streamlit = uv run streamlit run ./streamlit_app.py
